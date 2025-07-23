@@ -21,4 +21,4 @@ def limpiar_texto():
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=3000)
 
-mejora: limpieza robusta de texto
+#mejora: limpieza robusta de texto
