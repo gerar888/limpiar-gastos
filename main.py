@@ -2,17 +2,19 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-@app.route("/", methods=["POST"])
-def limpiar_texto():
-    data = request.get_json()
+@app.route("/", methods=["GET"])
+def home():
+    return "API is running"
+
+@app.route("/limpiar", methods=["POST"])
+def limpiar():
+    data = request.json
     texto = data.get("texto", "")
-
-    # Simulación de limpieza
-    resultado = {
-        "comercio": "bac credomatic" if "bac" in texto.lower() else None,
-        "monto": "2100" if "2.100" in texto else None,
-        "fecha": "21/07/2025" if "21/07/2025" in texto else None
+    
+    # Aquí va la lógica para limpiar el texto, por ahora simple
+    respuesta = {
+        "texto_original": texto,
+        "limpio": texto.upper()  # reemplazá esto por tu limpieza real
     }
-
-    return jsonify(resultado)
+    return jsonify(respuesta)
 #mejora: limpieza robusta de texto
