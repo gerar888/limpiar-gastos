@@ -88,7 +88,7 @@ def handle_request():
         import traceback
         traceback.print_exc() # Esto imprimirá el rastro completo del error
         return jsonify({"error": str(e), "message": "Error interno del servidor Python"}), 500
-
+#
 # Este bloque es crucial para que Gunicorn pueda ejecutar tu aplicación en Railway
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
