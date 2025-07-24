@@ -6,22 +6,26 @@ app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
 def handle_request():
-    print(f"--- LOG DE DEPURACION: Solicitud recibida en handle_request ---") # Este es el nuevo print
-    # raise Exception("ERROR FORZADO PARA DEPURACION INTERNA") # ¡Comenta o quita esta línea si la habías puesto!
+    # --- LOG DE DEPURACION: Esta línea nos dirá si la función se ejecuta ---
+    print(f"--- LOG DE DEPURACION: Solicitud recibida en handle_request ---")
+    
+    # --- ERROR FORZADO TEMPORAL: Esta línea causará un fallo visible en los logs ---
+    # Una vez que veas el log de arriba y este error, ELIMINA esta línea.
+    raise ValueError("ERROR FORZADO PARA DEPURACION DE LOGS INTERNOS") 
 
     try:
-        # Los siguientes prints deberían aparecer si la línea de arriba funciona
+        # Los siguientes prints deberían aparecer si el "raise ValueError" no estuviera
         print(f"--- NUEVA SOLICITUD RECIBIDA ---")
         print(f"Request Method: {request.method}")
         print(f"Request Headers: {request.headers}")
-        # print(f"Request Body (raw): {request.data}") # Lo comentamos para evitar logs muy largos
+        # print(f"Request Body (raw): {request.data}") # Comentado para evitar logs muy largos
 
         if not request.data:
             print("Error: No body data received in the request.")
             return jsonify({"error": "No data received"}), 400
 
         received_text = request.data.decode('utf-8')
-        print(f"Received text data: {received_text}") # Aquí debería aparecer todo el texto del correo
+        print(f"Received text data: {received_text}")
 
         # --- Lógica de Extracción de Datos del Texto ---
         nombre_gasto = "Desconocido"
@@ -81,4 +85,5 @@ def handle_request():
         traceback.print_exc()
         return jsonify({"error": str(e), "message": "Error interno del servidor Python"}), 500
 
-# No se necesita el if __name__ == '__main__': aquí para Railway.
+# Recuerda que el bloque "if __name__ == '__main__':" no es necesario
+# cuando usas Gunicorn en Railway.
