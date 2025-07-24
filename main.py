@@ -1,6 +1,7 @@
+
 import os
 from flask import Flask, request, jsonify
-import re
+import re # Importa el módulo de expresiones regulares
 
 app = Flask(__name__)
 
@@ -10,14 +11,14 @@ def handle_request():
         print(f"--- NUEVA SOLICITUD RECIBIDA ---")
         print(f"Request Method: {request.method}")
         print(f"Request Headers: {request.headers}")
-        print(f"Request Body (raw): {request.data}")
+        # print(f"Request Body (raw): {request.data}") # Lo comentamos para evitar logs muy largos
 
         if not request.data:
             print("Error: No body data received in the request.")
             return jsonify({"error": "No data received"}), 400
 
         received_text = request.data.decode('utf-8')
-        print(f"Received text data: {received_text}")
+        print(f"Received text data: {received_text}") # Aquí debería aparecer todo el texto del correo
 
         # --- Lógica de Extracción de Datos del Texto ---
         nombre_gasto = "Desconocido"
@@ -26,40 +27,51 @@ def handle_request():
         comercio = "Desconocido"
         fecha_transaccion = "Fecha Desconocida"
 
+        # Expresión regular para Comercio (se repite, así que capturaremos el primero)
+        # Búsqueda: "Comercio: " seguida de cualquier caracter ([\s\S]*?) hasta "Ciudad y país:" o "Fecha:" o fin de string
         comercio_match = re.search(r'Comercio:\s*([\s\S]*?)(?:Ciudad y país:|Fecha:|$)', received_text)
         if comercio_match:
             comercio = comercio_match.group(1).strip()
-            nombre_gasto = comercio
-        print(f"DEBUG: Comercio/Nombre del gasto encontrado: {comercio}")
+            nombre_gasto = comercio # Asignamos comercio como nombre_gasto por simplicidad
+        print(f"DEBUG: Comercio/Nombre del gasto encontrado: '{comercio}'")
 
+        # Expresión regular para Monto y Moneda
+        # Búsqueda: "Monto: " seguida de Moneda (USD|CRC|EUR) y luego número con puntos/comas
         monto_match = re.search(r'Monto:\s*(USD|CRC|EUR)\s*([\d\.,]+)', received_text)
         if monto_match:
             moneda = monto_match.group(1)
-            monto_str = monto_match.group(2).replace('.', '')
-            monto = monto_str.replace(',', '.')
-        print(f"DEBUG: Monto encontrado: {monto}, Moneda: {moneda}")
+            monto_str = monto_match.group(2).replace('.', '').replace(',', '.') # Elimina miles y asegura punto decimal
+            monto = monto_str
+        print(f"DEBUG: Monto encontrado: '{monto}', Moneda: '{moneda}'")
 
+        # Expresión regular para Fecha
+        # Búsqueda: "Fecha: " seguida de cualquier caracter hasta una coma y "YYYY, HH:MM"
         fecha_match = re.search(r'Fecha:\s*(.+?, \d{4}, \d{2}:\d{2})', received_text)
         if fecha_match:
             fecha_transaccion = fecha_match.group(1).strip()
-        print(f"DEBUG: Fecha encontrada: {fecha_transaccion}")
+        print(f"DEBUG: Fecha encontrada: '{fecha_transaccion}'")
 
+        # --- Cálculo para 'sobrepaso_ppto' (ejemplo simple) ---
         sobrepaso_ppto = False
         try:
-            if float(monto) > 50.00 and moneda == "USD":
+            # Asegúrate que 'monto' sea un número antes de comparar
+            monto_float = float(monto)
+            if monto_float > 50.00 and moneda == "USD":
                 sobrepaso_ppto = True
-            elif float(monto) > 30000.00 and moneda == "CRC":
+            elif monto_float > 30000.00 and moneda == "CRC":
                  sobrepaso_ppto = True
         except ValueError:
-            print(f"ADVERTENCIA: No se pudo convertir el monto '{monto}' a número para el cálculo de presupuesto.")
-            sobrepaso_ppto = False
+            print(f"ADVERTENCIA: No se pudo convertir el monto '{monto}' a número para el cálculo de presupuesto. Asumiendo False.")
+            sobrepaso_ppto = False # Si hay error al convertir, no sobrepasó presupuesto
 
-        comentario = f"Transacción de {comercio} por {moneda} {monto}."
+        # --- Comentario (puedes dejarlo vacío o generar uno) ---
+        comentario = f"Transacción de {comercio} por {moneda} {monto}." # Ejemplo
 
+        # --- Preparar la respuesta JSON para Make ---
         response_data = {
             "nombre_gasto": nombre_gasto,
             "moneda": moneda,
-            "monto": float(monto),
+            "monto": float(monto), # Convertir a float ANTES de enviar a Make
             "comercio": comercio,
             "fecha_transaccion": fecha_transaccion,
             "sobrepaso_ppto": sobrepaso_ppto,
@@ -73,11 +85,20 @@ def handle_request():
     except Exception as e:
         print(f"!!! ERROR FATAL EN LA APLICACIÓN PYTHON: {e}")
         import traceback
-        traceback.print_exc()
+        traceback.print_exc() # Esto imprimirá el rastro completo del error
         return jsonify({"error": str(e), "message": "Error interno del servidor Python"}), 500
 
-# Esto asegura que gunicorn se encargue de ejecutar la app en Railway
-# y que la app.run() solo se use si ejecutas el archivo directamente para pruebas locales.
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port)
+    ```
+
+---
+
+### **Acciones a Realizar y lo que Espero Ver en los Logs de Railway:**
+
+1.  **Asegúrate de tener este CÓDIGO ACTUALIZADO en tu `main.py` en GitHub.** Haz un "commit" y "push" y espera a que Railway.app despliegue y esté "Active".
+2.  **Una vez "Active", abre la pestaña "Logs" en Railway.app.**
+3.  **Ejecuta el escenario de Make.**
+4.  **Captura los logs de Railway.app.**
+
+**¿Qué buscaremos en los logs de Railway.app?**
+
+Si todo va bien, deberíamos ver:
