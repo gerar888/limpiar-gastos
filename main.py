@@ -99,7 +99,7 @@ def process_email():
         # Puedes añadir aquí tu lógica para determinar si sobrepasó un presupuesto
         # Por ejemplo, si el monto es mayor a un valor fijo
         sobrepaso_ppto = monto > 50.0  # Ejemplo: Si el gasto es mayor a 50 USD
-# 
+
         # Comentario adicional (opcional)
         comentario = "Gasto procesado automáticamente."
         if sobrepaso_ppto:
