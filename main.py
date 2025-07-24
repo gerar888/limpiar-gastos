@@ -2,7 +2,7 @@ import os
 from flask import Flask, request, jsonify
 import re # Importa el módulo de expresiones regulares
 
-app = Flask(__name__)
+app = Flask(__name__) # Tu aplicación Flask
 
 @app.route('/', methods=['POST'])
 def handle_request():
@@ -88,9 +88,6 @@ def handle_request():
         import traceback
         traceback.print_exc() # Esto imprimirá el rastro completo del error
         return jsonify({"error": str(e), "message": "Error interno del servidor Python"}), 500
-#
-# Este bloque es crucial para que Gunicorn pueda ejecutar tu aplicación en Railway
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8000))
-    # Asegúrate de que app.run() escuche en 0.0.0.0 para ser accesible en Railway
-    app.run(host='0.0.0.0', port=port)
+
+# YA NO NECESITAMOS EL if __name__ == '__main__': BLOQUE AQUÍ
+# Gunicorn se encargará de ejecutar 'app' directamente.
