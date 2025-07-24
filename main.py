@@ -90,7 +90,7 @@ def handle_request():
 
     ```
 
----
+###---
 
 ### **Acciones a Realizar y lo que Espero Ver en los Logs de Railway:**
 
@@ -99,6 +99,6 @@ def handle_request():
 3.  **Ejecuta el escenario de Make.**
 4.  **Captura los logs de Railway.app.**
 
-**¿Qué buscaremos en los logs de Railway.app?**
+###**¿Qué buscaremos en los logs de Railway.app?**
 
-Si todo va bien, deberíamos ver:
+###Si todo va bien, deberíamos ver:
