@@ -1,147 +1,180 @@
 import os
+from flask import Flask, request, jsonify
 import re
-import json
 import sys
-from flask import Flask, request
 
-app = Flask(__name__)
-
-# Función para limpiar el texto (eliminar URLs y el texto "Icono decorativo [URL]")
-def clean_text(text):
-    # Eliminar patrones de "Icono decorativo [URL]"
-    text = re.sub(r'Icono decorativo \[https?://[^\s\]]+\]', '', text)
-    # Eliminar cualquier URL restante que no sea parte de un patrón específico que queremos mantener
-    text = re.sub(r'https?://[^\s\]]+', '', text)
-    # También eliminar los '[https://...]' que quedan después de eliminar los logos al inicio
-    text = re.sub(r'\[https?://[^\s\]]+\]', '', text)
-    return text
+app = Flask(__app__)
 
 @app.route('/', methods=['POST'])
-def process_email():
+def handle_request():
+    sys.stderr.write(f"--- LOG DE DEPURACION: Solicitud recibida en handle_request ---\n")
+    
     try:
-        # --- NUEVAS LÍNEAS DE DEPURACIÓN (MUY IMPORTANTES) ---
-        sys.stderr.write(f"DEBUG: Request.data (raw): {request.data}\n")
-        sys.stderr.write(f"DEBUG: Request.content_type: {request.content_type}\n")
-        # --- FIN DE NUEVAS LÍNEAS DE DEPURACIÓN ---
+        sys.stderr.write(f"--- NUEVA SOLICITUD RECIBIDA ---\n")
+        sys.stderr.write(f"Request Method: {request.method}\n")
+        sys.stderr.write(f"Request Headers: {request.headers}\n")
 
-        data = None
-        try:
-            data = request.json
-            sys.stderr.write(f"DEBUG: Request.json (parsed): {data}\n") # Log del JSON parseado
-        except Exception as e:
-            sys.stderr.write(f"ERROR: No se pudo parsear JSON: {e}\n")
-            return json.dumps({"status": "error", "message": f"Invalid JSON format: {e}"}), 400
-
-        if not data or 'text' not in data:
-            sys.stderr.write("ERROR: No 'text' field found in the request data or data is empty.\n")
-            return json.dumps({"status": "error", "message": "No 'text' field in JSON"}), 400
-
-        received_text = data['text']
+        # --- CAMBIO IMPORTANTE AQUÍ: LEER JSON SI Make ENVÍA JSON ---
+        request_json = request.get_json()
+        if not request_json or 'text' not in request_json:
+            sys.stderr.write("Error: 'text' field is empty or null in JSON payload.\n")
+            return jsonify({"error": "'text' field is empty or null"}), 400
         
-        # Validación extra: si 'text' es nulo o una cadena vacía
-        if not received_text:
-            sys.stderr.write("ERROR: 'text' field is empty or null.\n")
-            return json.dumps({"status": "error", "message": "'text' field is empty"}), 400
-
-        sys.stderr.write(f"DEBUG: Texto recibido: '{received_text[:200]}...'\n") # Muestra solo los primeros 200 caracteres
-
-        # --- Limpieza del Texto ---
-        cleaned_text = clean_text(received_text)
-        sys.stderr.write(f"DEBUG: Texto limpiado: '{cleaned_text[:200]}...'\n")
+        received_text = request_json.get('text')
+        # Si Make envía texto plano directamente, usar esta línea en su lugar y comentar las 4 anteriores:
+        # received_text = request.data.decode('utf-8') 
+        
+        sys.stderr.write(f"Received text data: {received_text}\n")
 
         # --- Lógica de Extracción de Datos del Texto ---
-        comercio = "Desconocido"
-        monto = 0.0
+        nombre_gasto = "Desconocido"
         moneda = "N/A"
-        fecha_transaccion = "N/A"
-        tipo_tarjeta = "Desconocido"
-        ultimos_4_tarjeta = "N/A"
-        autorizacion = "N/A"
-        tipo_transaccion = "Desconocido" # Añadido el tipo de transacción
+        monto = "0.00"
+        comercio = "Desconocido"
+        fecha_transaccion = "Fecha Desconocida"
+        
+        # Nuevos campos
+        tarjeta = "Desconocida"
+        ultimos_4_digitos = "N/A"
+        numero_autorizacion = "N/A"
+        tipo_transaccion = "Desconocido"
+        ciudad_pais_comercio = "Desconocida" # Inicializar como string
 
-        # Extracción de Comercio
-        comercio_match = re.search(r'Comercio:\s*([\s\w]+)', cleaned_text)
+        # Expresiones Regulares (RegEx) para extraer la información
+        # Asegúrate de que los patrones coincidan exactamente con tus correos
+        
+        # Comercio
+        comercio_match = re.search(r'Comercio:\s*([\s\S]*?)(?:Ciudad y país:|Fecha:|Monto:|$)', received_text)
         if comercio_match:
             comercio = comercio_match.group(1).strip()
-        sys.stderr.write(f"DEBUG: Comercio encontrado: '{comercio}'\n")
+            nombre_gasto = comercio
+        sys.stderr.write(f"DEBUG: Comercio/Nombre del gasto encontrado: '{comercio}'\n")
 
-        # Extracción de Monto y Moneda
-        monto_moneda_match = re.search(r'Monto:\s*([A-Z]{3})\s*([\d\.,]+)', cleaned_text)
-        if monto_moneda_match:
-            moneda = monto_moneda_match.group(1).strip()
-            # Reemplazar ',' por '' para miles, y luego '.' para decimales si es necesario (el float lo maneja)
-            monto_str = monto_moneda_match.group(2).replace(',', '') 
-            try:
-                monto = float(monto_str)
-            except ValueError:
-                sys.stderr.write(f"ERROR: No se pudo convertir el monto '{monto_str}' a float.\n")
-                monto = 0.0 # Valor por defecto si falla la conversión
-        sys.stderr.write(f"DEBUG: Monto encontrado: {monto}, Moneda: '{moneda}'\n")
+        # Monto y Moneda
+        monto_match = re.search(r'Monto:\s*(USD|CRC|EUR|ARS|MXN|BRL|GTQ|HNL|NIO|PAB|DOP|CLP|COP|PEN|PYG|UYU|VES|BOB|GYD|SRD|XCD)\s*([\d\.,]+)', received_text)
+        if monto_match:
+            moneda = monto_match.group(1)
+            # Manejo de separador de miles (punto) y decimales (coma) o viceversa
+            monto_str = monto_match.group(2).replace('.', '').replace(',', '.') # Asume 1.000,00 -> 1000.00
+            monto = monto_str
+        sys.stderr.write(f"DEBUG: Monto encontrado: '{monto}', Moneda: '{moneda}'\n")
 
-        # Extracción de Fecha
-        # Modificado para capturar el formato "Mes Día, Año, HH:MM"
-        fecha_match = re.search(r'Fecha:\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}, \d{4}, \d{2}:\d{2}', cleaned_text)
+        # Fecha de Transacción
+        fecha_match = re.search(r'Fecha:\s*(.+?, \d{4}, \d{2}:\d{2})', received_text)
         if fecha_match:
-            fecha_transaccion = fecha_match.group(0).replace('Fecha:', '').strip()
+            fecha_transaccion = fecha_match.group(1).strip()
         sys.stderr.write(f"DEBUG: Fecha encontrada: '{fecha_transaccion}'\n")
-
+        
         # --- Nuevas Extracciones ---
 
-        # Extracción de Tipo de Tarjeta y Últimos 4 Dígitos
-        tarjeta_match = re.search(r'(AMEX|VISA|MASTERCARD)\s*\*+([\d]{4})', cleaned_text, re.IGNORECASE)
+        # Tarjeta (ej. AMEX, VISA, MASTERCARD) y Últimos 4 Dígitos
+        # Patrones comunes: "Tarjeta: AMEX (****1234)", "Tarjeta AMEX ****1234", "Terminada en 1234 (VISA)"
+        # Ajusta este patrón a cómo aparece en tus correos
+        tarjeta_match = re.search(r'(?:Tarjeta|Medio de Pago):\s*([A-Za-z]+)(?:\s*\(?(\*+)(\d{4})\)?)?', received_text, re.IGNORECASE)
         if tarjeta_match:
-            tipo_tarjeta = tarjeta_match.group(1).upper()
-            ultimos_4_tarjeta = tarjeta_match.group(2)
+            tarjeta = tarjeta_match.group(1).upper() # Convertir a mayúsculas (VISA, AMEX, etc.)
+            if tarjeta_match.group(3): # Si se capturaron los últimos 4 dígitos
+                ultimos_4_digitos = tarjeta_match.group(3)
+        # Otro patrón si la tarjeta y los 4 dígitos están separados o en otro formato
         else:
-            ultimos_4_match = re.search(r'\*+(\d{4})', cleaned_text)
-            if ultimos_4_match:
-                ultimos_4_tarjeta = ultimos_4_match.group(1)
-        sys.stderr.write(f"DEBUG: Tipo Tarjeta: '{tipo_tarjeta}', Últimos 4 Tarjeta: '{ultimos_4_tarjeta}'\n")
+             ultimos_4_digitos_match = re.search(r'(?:terminada en|finaliza en|con tarjeta)\s*(\d{4})', received_text, re.IGNORECASE)
+             if ultimos_4_digitos_match:
+                 ultimos_4_digitos = ultimos_4_digitos_match.group(1)
+             tarjeta_tipo_match = re.search(r'(Visa|Mastercard|Amex|American Express|Discover|Diners Club)', received_text, re.IGNORECASE)
+             if tarjeta_tipo_match:
+                 tarjeta = tarjeta_tipo_match.group(1).upper()
 
-        # Extracción de Número de Autorización
-        autorizacion_match = re.search(r'Autorización:\s*(\d+)', cleaned_text)
+        sys.stderr.write(f"DEBUG: Tarjeta: '{tarjeta}', Últimos 4 Dígitos: '{ultimos_4_digitos}'\n")
+
+        # Número de Autorización
+        # Patrones comunes: "No. Autorización: 123456", "Autorización #123456", "Código de Autorización: 123456"
+        autorizacion_match = re.search(r'(?:No\.?\s*Autorización|Autorización No?\.?|Código de Autorización|Auth Code):\s*(\w+)', received_text, re.IGNORECASE)
         if autorizacion_match:
-            autorizacion = autorizacion_match.group(1).strip()
-        sys.stderr.write(f"DEBUG: Autorización: '{autorizacion}'\n")
+            numero_autorizacion = autorizacion_match.group(1).strip()
+        sys.stderr.write(f"DEBUG: Número de Autorización: '{numero_autorizacion}'\n")
 
-        # Extracción de Tipo de Transacción
-        tipo_transaccion_match = re.search(r'Tipo de Transacción:\s*([A-Z\s]+)', cleaned_text)
+        # Tipo de Transacción (ej. Compra, Retiro, Débito, Crédito)
+        # Ajusta este patrón si tus correos usan frases específicas
+        tipo_transaccion_match = re.search(r'(Compra|Retiro|Débito|Crédito|Pago|Transacción)\s+(?:por|realizada|efectuada)', received_text, re.IGNORECASE)
         if tipo_transaccion_match:
             tipo_transaccion = tipo_transaccion_match.group(1).strip()
+        else: # Si no se encuentra un tipo explícito, intentar inferir por la moneda/monto o saldo
+            if re.search(r'nuevo saldo|saldo actual|disponible', received_text, re.IGNORECASE):
+                if float(monto) > 0: # Si es un aumento de saldo o un gasto
+                     tipo_transaccion = "Compra/Débito" # Se puede afinar más
+            elif re.search(r'Reverso|Anulación', received_text, re.IGNORECASE):
+                tipo_transaccion = "Reverso/Anulación"
+            elif re.search(r'Retiro', received_text, re.IGNORECASE):
+                tipo_transaccion = "Retiro"
+            elif float(monto) < 0:
+                tipo_transaccion = "Crédito/Reembolso"
+
+
         sys.stderr.write(f"DEBUG: Tipo de Transacción: '{tipo_transaccion}'\n")
 
+        # Ciudad y País del Comercio (ej. San José, Costa Rica)
+        # Este es más delicado porque los formatos varían mucho.
+        # Intento 1: "Ciudad y país: San José, Costa Rica"
+        ciudad_pais_match = re.search(r'Ciudad y país:\s*([\s\S]*?)(?:Fecha:|Monto:|$)', received_text)
+        if ciudad_pais_match:
+            ciudad_pais_comercio = ciudad_pais_match.group(1).strip()
+        # Intento 2: Buscar patrones comunes para ubicaciones después del Comercio o de la Dirección
+        elif re.search(r'\b(?:ciudad|city|ubicacion|location):\s*([A-Za-z\s,.]+)\s*,\s*([A-Za-z\s.]+)\b', received_text, re.IGNORECASE):
+             ciudad_pais_comercio = re.search(r'\b(?:ciudad|city|ubicacion|location):\s*([A-Za-z\s,.]+)\s*,\s*([A-Za-z\s.]+)\b', received_text, re.IGNORECASE).group(1).strip() + ", " + re.search(r'\b(?:ciudad|city|ubicacion|location):\s*([A-Za-z\s,.]+)\s*,\s*([A-Za-z\s.]+)\b', received_text, re.IGNORECASE).group(2).strip()
+        
+        sys.stderr.write(f"DEBUG: Ciudad y País del Comercio: '{ciudad_pais_comercio}'\n")
 
-        # --- Lógica de Negocio (Ejemplo de sobrepaso_ppto) ---
-        sobrepaso_ppto = monto > 50.0 
+        # Lógica de sobrepaso de presupuesto (sin cambios, pero se mantiene)
+        sobrepaso_ppto = False
+        try:
+            monto_float = float(monto)
+            if moneda == "USD":
+                if monto_float > 50.00:
+                    sobrepaso_ppto = True
+            elif moneda == "CRC":
+                if monto_float > 30000.00:
+                    sobrepaso_ppto = True
+        except ValueError:
+            sys.stderr.write(f"ADVERTENCIA: No se pudo convertir el monto '{monto}' a número para el cálculo de presupuesto. Asumiendo False.\n")
+            sobrepaso_ppto = False
 
-        # Comentario adicional (opcional)
-        comentario = "Gasto procesado automáticamente."
-        if sobrepaso_ppto:
-            comentario = "¡Alerta! Gasto alto detectado."
+        comentario = f"Transacción de {comercio} por {moneda} {monto}."
+        if tarjeta != "Desconocida" and ultimos_4_digitos != "N/A":
+            comentario += f" (Tarjeta: {tarjeta} ****{ultimos_4_digitos})."
+        if tipo_transaccion != "Desconocido":
+            comentario += f" Tipo: {tipo_transaccion}."
+        if numero_autorizacion != "N/A":
+            comentario += f" Autorización: {numero_autorizacion}."
+        if ciudad_pais_comercio != "Desconocida":
+            comentario += f" Ubicación: {ciudad_pais_comercio}."
 
-        # --- Construir la respuesta JSON ---
+
         response_data = {
-            "comercio": comercio,
-            "monto": monto,
+            "nombre_gasto": nombre_gasto,
             "moneda": moneda,
+            "monto": float(monto), # Aseguramos que sea float para Notion
+            "comercio": comercio,
             "fecha_transaccion": fecha_transaccion,
-            "tipo_tarjeta": tipo_tarjeta,
-            "ultimos_4_tarjeta": ultimos_4_tarjeta,
-            "autorizacion": autorizacion,
-            "tipo_transaccion": tipo_transaccion,
             "sobrepaso_ppto": sobrepaso_ppto,
-            "comentario": comentario
+            "comentario": comentario,
+            # --- Nuevos campos en el JSON de respuesta ---
+            "tarjeta": tarjeta,
+            "ultimos_4_digitos": ultimos_4_digitos,
+            "numero_autorizacion": numero_autorizacion,
+            "tipo_transaccion": tipo_transaccion,
+            "ciudad_pais_comercio": ciudad_pais_comercio
         }
 
-        sys.stderr.write(f"DEBUG: Respondiendo con JSON: {json.dumps(response_data, indent=2)}\n")
-        return json.dumps(response_data), 200, {'Content-Type': 'application/json'}
+        sys.stderr.write(f"DEBUG: Datos parseados para Make: {response_data}\n")
+
+        return jsonify(response_data), 200
 
     except Exception as e:
-        sys.stderr.write(f"ERROR: An unexpected error occurred in process_email: {e}\n")
-        # Asegúrate de que el error siempre retorne un JSON válido
-        return json.dumps({"status": "error", "message": f"Server error: {str(e)}"}), 500
+        sys.stderr.write(f"!!! ERROR FATAL EN LA APLICACIÓN PYTHON: {e}\n")
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return jsonify({"error": str(e), "message": "Error interno del servidor Python"}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 3000))
-    sys.stderr.write(f"DEBUG: Starting Flask app on port {port}\n")
-    app.run(host='0.0.0.0', port=port)
+    # Esto es solo para depuración local si lo corres directamente. Railway usa Gunicorn.
+    app.run(debug=True, host='0.0.0.0', port=os.getenv('PORT', 5000))
