@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import re
 import sys
 import os # Importar para obtener el puerto
-import urllib.parse # Necesitas esta importación para urllib.parse.unquote
+import urllib.parse 
 
 app = Flask(__name__)
 
@@ -28,7 +28,6 @@ def handle_request():
         else:
             text_field = request_json.get('text')
             if text_field:
-                # Se mantiene unquote por si Make decidiera codificar, es inofensivo si no lo hace.
                 text_to_parse = urllib.parse.unquote(text_field)
                 sys.stderr.write(f"DEBUG: 'text' field from JSON (decoded): {text_to_parse[:500]}...\n")
             else:
@@ -49,12 +48,12 @@ def handle_request():
 
         # --- EXTRACCIÓN DEL MONTO Y MONEDA ---
         # RegEx para capturar la moneda y el valor.
-        # Captura: [Moneda/Símbolo] [Espacios] [Número con puntos/comas/decimales]
+        # Es flexible para "Monto: ", moneda/símbolo, y el número con puntos y/o comas.
         monto_match = re.search(
-            r'(?:Monto:\s*)?' # "Monto: " (opcional, para ser más flexible)
-            r'(USD|CRC|EUR|ARS|MXN|BRL|GTQ|HNL|NIO|PAB|DOP|CLP|COP|PEN|PYG|UYU|VES|BOB|GYD|SRD|XCD|[$€£])' # Grupo 1: Moneda/Símbolo
-            r'\s*' # Espacios
-            r'([\d\.,]+)', # Grupo 2: El número, que puede tener puntos, comas o ambos.
+            r'(?:Monto:\s*)?' 
+            r'(USD|CRC|EUR|ARS|MXN|BRL|GTQ|HNL|NIO|PAB|DOP|CLP|COP|PEN|PYG|UYU|VES|BOB|GYD|SRD|XCD|[$€£])' 
+            r'\s*' 
+            r'([\d\.,]+)', # Captura el número con puntos y/o comas
             text_to_parse, re.IGNORECASE
         )
         
@@ -62,14 +61,14 @@ def handle_request():
             moneda_identificada = monto_match.group(1).upper()
             monto_str_raw = monto_match.group(2)
 
-            # Estandarizar la moneda a un código ISO (USD, CRC, EUR, etc.)
+            # Estandarizar la moneda a un código ISO
             if moneda_identificada == '$':
                 moneda = 'USD'
             elif moneda_identificada == '€':
                 moneda = 'EUR'
             elif moneda_identificada == 'CRC':
                 moneda = 'CRC'
-            else: # Si ya es 'USD', 'EUR', etc.
+            else: 
                 moneda = moneda_identificada
 
             # Lógica de limpieza y conversión del monto a float, específica por moneda.
@@ -78,44 +77,53 @@ def handle_request():
                 # Para USD: Asumimos punto como decimal. Si hay comas, son miles (ej. 1,234.56). Quitar comas.
                 monto_cleaned = monto_str_raw.replace(',', '')
             elif moneda == 'CRC':
-                # Para CRC:
-                # Costa Rica usa coma (,) para decimales y punto (.) para miles.
-                # Ejemplos: 26.250,00 CRC (veintiséis mil doscientos cincuenta con cero céntimos)
-                #           26,25 CRC (veintiséis con veinticinco céntimos)
-                #           26250 CRC (veintiséis mil doscientos cincuenta sin decimales indicados)
+                # Para CRC (Costa Rica): Coma (,) para decimales y punto (.) para miles.
+                # Ejemplos: 26.250,00 CRC, 26,25 CRC, 26250 CRC (sin decimales)
 
-                if ',' in monto_str_raw: # Si el número contiene una coma, asumimos que es el separador decimal (formato CRC)
+                # Prioridad 1: Si hay coma, asumimos formato con coma decimal (ej. 1.234,56)
+                if ',' in monto_str_raw:
                     monto_cleaned = monto_str_raw.replace('.', '') # Quita los puntos de miles
                     monto_cleaned = monto_cleaned.replace(',', '.') # Cambia la coma decimal por punto decimal para Python
-                else: # Si no hay coma, podría ser un entero grande o un decimal con punto (USD-like)
-                    # En CRC, si no hay coma, es probable un entero sin decimales (ej. 26250)
-                    # No hacer ningún replace si no hay coma, a menos que haya puntos (miles USD-like)
-                    # Si hay puntos pero no comas, es posible que sea un formato mixto o un entero grande
-                    # Para simplificar y cubrir 26250 CRC, si no hay coma, lo dejamos como está.
-                    # Si fuera "26.250" sin coma, ya lo manejaría directamente float.
-                    monto_cleaned = monto_str_raw # No se hace ningún reemplazo para números enteros sin coma.
-
-            else: # Para otras monedas, por defecto asumimos formato con punto decimal (como USD)
+                # Prioridad 2: Si no hay coma, pero hay puntos (ej. 26.25, o 26.250 sin coma)
+                # y el número DESPUÉS del último punto tiene 1 o 2 dígitos, asumimos que el punto era separador de miles
+                # (o un error donde el punto fue un decimal y se omitieron los miles)
+                # Esto es para casos como "26.25" que en realidad debe ser "26250".
+                elif '.' in monto_str_raw:
+                    # Dividir por el punto para ver la parte decimal
+                    parts = monto_str_raw.split('.')
+                    # Si el último segmento tiene 1 o 2 dígitos, es probable que el punto sea un separador de miles mal puesto.
+                    # Ej: "26.25" -> parts = ["26", "25"]. len("25") es 2.
+                    # Ej: "2.2" -> parts = ["2", "2"]. len("2") es 1.
+                    if len(parts[-1]) <= 2: 
+                        monto_cleaned = monto_str_raw.replace('.', '') # Elimina todos los puntos. Ej: "26.25" -> "2625"
+                    else: # Si tiene más de 2 dígitos, asumimos que es un número con punto decimal o punto de miles.
+                          # Ej: "123.456" - puede ser 123.456 (USD) o 123456 (CRC sin coma)
+                          # Para CRC sin coma y puntos, asumimos que los puntos son separadores de miles y los eliminamos
+                          # Si fuera 26.00, se convertiría a 2600. Necesitamos el log para afinar más.
+                        monto_cleaned = monto_str_raw.replace('.', '')
+                else: 
+                    # Si no hay puntos ni comas (ej. "26250"), se deja tal cual.
+                    monto_cleaned = monto_str_raw
+            else: # Para otras monedas (por defecto como USD, punto decimal)
                 monto_cleaned = monto_str_raw.replace(',', '') 
             
             try:
                 monto = float(monto_cleaned)
             except ValueError:
                 sys.stderr.write(f"ADVERTENCIA: No se pudo convertir el monto '{monto_cleaned}' a float. Estableciendo a 0.00.\n")
-                monto = 0.00 # Resetear a 0.00 si falla la conversión
+                monto = 0.00 
 
         # --- EXTRACCIÓN DEL COMERCIO ---
-        # Patrón flexible para "Comercio: [Nombre]" o "Compra en [Nombre]"
-        # Captura: [Nombre del comercio] que puede contener letras, números, espacios, puntos, guiones y ampersands (&).
+        # Patrón flexible que busca la etiqueta "Comercio:" o frases similares.
+        # Captura el nombre que puede contener letras, números, espacios, puntos, guiones y ampersands (&).
         comercio_match = re.search(
-            r'(?:Comercio|Compra en|Movimiento en|Transacción en):\s*([A-Za-z0-9\s\.\-&]+)', # Añadido '&' para nombres como "AMZN Mktp US"
+            r'(?:Comercio|Compra en|Movimiento en|Transacción en):\s*([A-Za-z0-9\s\.\-&]+)', 
             text_to_parse, re.IGNORECASE
         )
         if comercio_match:
             comercio = comercio_match.group(1).strip()
         
         # --- EXTRACCIÓN DE FECHA DE TRANSACCIÓN ---
-        # Patrón para formatos comunes de fecha
         fecha_transaccion_match = re.search(
             r'Fecha:\s*(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}|\d{1,2}\s+(?:de)?\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+\s*(?:de)?\s*\d{2,4})', 
             text_to_parse, re.IGNORECASE
@@ -124,20 +132,18 @@ def handle_request():
             fecha_transaccion = fecha_transaccion_match.group(1).strip()
 
         # --- EXTRACCIÓN DE TARJETA Y ÚLTIMOS 4 DÍGITOS ---
-        # Patrón para "Tarjeta: VISA ****1234"
         tarjeta_match = re.search(
-            r'(?:Tarjeta|Medio de Pago):\s*([A-Za-z]+)(?:\s*\*+(\d{4}))?', # Captura el tipo y los últimos 4 dígitos
+            r'(?:Tarjeta|Medio de Pago):\s*([A-Za-z]+)(?:\s*\*+(\d{4}))?', 
             text_to_parse, re.IGNORECASE
         )
         if tarjeta_match:
             tarjeta = tarjeta_match.group(1).upper()
-            if tarjeta_match.group(2): # Si se capturaron los últimos 4 dígitos
+            if tarjeta_match.group(2): 
                 ultimos_4_digitos = tarjeta_match.group(2)
             else:
                 ultimos_4_digitos = "N/A" 
 
         # --- EXTRACCIÓN DE NÚMERO DE AUTORIZACIÓN ---
-        # Patrón para "Autorización: 123456"
         autorizacion_match = re.search(
             r'(?:No\.?\s*Autorización|Autorización No?\.?|Código de Autorización|Auth Code):\s*(\w+)', 
             text_to_parse, re.IGNORECASE
@@ -146,7 +152,6 @@ def handle_request():
             numero_autorizacion = autorizacion_match.group(1).strip()
 
         # --- EXTRACCIÓN DE TIPO DE TRANSACCIÓN ---
-        # Patrón para "Tipo: Compra"
         tipo_transaccion_match = re.search(
             r'(?:Tipo:\s*)(Compra|Retiro|Débito|Crédito|Pago|Transacción)', 
             text_to_parse, re.IGNORECASE
@@ -156,20 +161,18 @@ def handle_request():
 
         # --- Lógica de sobrepaso_ppto ---
         sobrepaso_ppto = False
-        # Asegúrate de que monto sea un número antes de comparar
         if isinstance(monto, (int, float)):
             if moneda == "USD":
                 if monto > 50.00:
                     sobrepaso_ppto = True
             elif moneda == "CRC":
-                if monto > 30000.00: # Ajusta este umbral si 30,000 es para el ejemplo
+                if monto > 30000.00: 
                     sobrepaso_ppto = True
         else: 
             sys.stderr.write(f"ADVERTENCIA: Monto no es numérico para cálculo de presupuesto ({monto}). Asumiendo False.\n")
             sobrepaso_ppto = False
 
         # --- Generación del Comentario ---
-        # Formatear el monto con 2 decimales para el comentario
         comentario = f"Transacción de {comercio} por {moneda} {monto:.2f}." 
         if tarjeta != "Desconocida" and ultimos_4_digitos != "N/A":
             comentario += f" (Tarjeta: {tarjeta} ****{ultimos_4_digitos})."
