@@ -1,15 +1,14 @@
 from flask import Flask, request, jsonify
 import re
 import sys
-import os # Importar para obtener el puerto
-import urllib.parse 
+import os
+import urllib.parse
 
 app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
 def handle_request():
     try:
-        # --- DEBUG: Impresión del contenido de la solicitud (RAW y JSON) ---
         raw_data = request.data.decode('utf-8', errors='ignore')
         sys.stderr.write(f"--- DEBUG RAW DATA RECEIVED ---\n")
         sys.stderr.write(f"Raw Request Data: {raw_data}\n")
@@ -35,10 +34,11 @@ def handle_request():
                 return jsonify({"status": "error", "message": "JSON parsed but 'text' field missing"}), 400
 
         # --- Inicialización de variables de extracción ---
-        nombre_gasto = "Desconocido"
+        nombre_gasto = "Desconocido" # Se mantendrá "Desconocido" por ahora, si no hay un patrón claro para un "nombre de gasto" distinto al "comercio".
+                                      # Si quieres que 'nombre_gasto' sea lo mismo que 'comercio', lo asignaremos al final.
         moneda = "N/A"
-        monto = 0.00 # Inicializar como float
-        comercio = "Desconocido" 
+        monto = 0.00 
+        comercio = "Desconocido" # Ahora será más inteligente
         fecha_transaccion = "Fecha Desconocida"
         tarjeta = "Desconocida"
         ultimos_4_digitos = "N/A"
@@ -47,21 +47,20 @@ def handle_request():
         ciudad_pais_comercio = "Desconocida"
 
         # --- EXTRACCIÓN DEL MONTO Y MONEDA ---
-        # RegEx para capturar la moneda y el valor.
-        # Es flexible para "Monto: ", moneda/símbolo, y el número con puntos y/o comas.
         monto_match = re.search(
             r'(?:Monto:\s*)?' 
             r'(USD|CRC|EUR|ARS|MXN|BRL|GTQ|HNL|NIO|PAB|DOP|CLP|COP|PEN|PYG|UYU|VES|BOB|GYD|SRD|XCD|[$€£])' 
             r'\s*' 
-            r'([\d\.,]+)', # Captura el número con puntos y/o comas
+            r'([\d\.,]+)', 
             text_to_parse, re.IGNORECASE
         )
         
+        original_monto_str_raw = "" # Guardar el string original para la lógica de multiplicación
         if monto_match:
             moneda_identificada = monto_match.group(1).upper()
-            monto_str_raw = monto_match.group(2)
+            original_monto_str_raw = monto_match.group(2) # Guarda el string original capturado
+            monto_str_processed = original_monto_str_raw # Variable para trabajar con ella
 
-            # Estandarizar la moneda a un código ISO
             if moneda_identificada == '$':
                 moneda = 'USD'
             elif moneda_identificada == '€':
@@ -72,56 +71,63 @@ def handle_request():
                 moneda = moneda_identificada
 
             # Lógica de limpieza y conversión del monto a float, específica por moneda.
-            monto_cleaned = monto_str_raw
             if moneda == 'USD':
-                # Para USD: Asumimos punto como decimal. Si hay comas, son miles (ej. 1,234.56). Quitar comas.
-                monto_cleaned = monto_str_raw.replace(',', '')
+                monto_str_processed = monto_str_processed.replace(',', '') # Quita comas de miles para USD
             elif moneda == 'CRC':
-                # Para CRC (Costa Rica): Coma (,) para decimales y punto (.) para miles.
-                # Ejemplos: 26.250,00 CRC, 26,25 CRC, 26250 CRC (sin decimales)
-
-                # Prioridad 1: Si hay coma, asumimos formato con coma decimal (ej. 1.234,56)
-                if ',' in monto_str_raw:
-                    monto_cleaned = monto_str_raw.replace('.', '') # Quita los puntos de miles
-                    monto_cleaned = monto_cleaned.replace(',', '.') # Cambia la coma decimal por punto decimal para Python
-                # Prioridad 2: Si no hay coma, pero hay puntos (ej. 26.25, o 26.250 sin coma)
-                # y el número DESPUÉS del último punto tiene 1 o 2 dígitos, asumimos que el punto era separador de miles
-                # (o un error donde el punto fue un decimal y se omitieron los miles)
-                # Esto es para casos como "26.25" que en realidad debe ser "26250".
-                elif '.' in monto_str_raw:
-                    # Dividir por el punto para ver la parte decimal
-                    parts = monto_str_raw.split('.')
-                    # Si el último segmento tiene 1 o 2 dígitos, es probable que el punto sea un separador de miles mal puesto.
-                    # Ej: "26.25" -> parts = ["26", "25"]. len("25") es 2.
-                    # Ej: "2.2" -> parts = ["2", "2"]. len("2") es 1.
+                # Regla 1: Si hay coma, es el decimal (formato CRC estándar: 1.234,56)
+                if ',' in monto_str_processed:
+                    monto_str_processed = monto_str_processed.replace('.', '') # Quita los puntos de miles
+                    monto_str_processed = monto_str_processed.replace(',', '.') # Cambia coma decimal por punto decimal
+                # Regla 2: Si NO hay coma, pero hay puntos. Esto puede ser un entero (123.456) o un decimal mal puesto (26.25 para 26250)
+                elif '.' in monto_str_processed:
+                    parts = monto_str_processed.split('.')
+                    # Si el último segmento tiene 1 o 2 dígitos, y es un CRC, es muy probable que sea un formato "decimal" incorrecto
+                    # que en realidad es un número entero con punto de miles mal colocado, o que se esperaba un número mayor.
                     if len(parts[-1]) <= 2: 
-                        monto_cleaned = monto_str_raw.replace('.', '') # Elimina todos los puntos. Ej: "26.25" -> "2625"
-                    else: # Si tiene más de 2 dígitos, asumimos que es un número con punto decimal o punto de miles.
-                          # Ej: "123.456" - puede ser 123.456 (USD) o 123456 (CRC sin coma)
-                          # Para CRC sin coma y puntos, asumimos que los puntos son separadores de miles y los eliminamos
-                          # Si fuera 26.00, se convertiría a 2600. Necesitamos el log para afinar más.
-                        monto_cleaned = monto_str_raw.replace('.', '')
-                else: 
-                    # Si no hay puntos ni comas (ej. "26250"), se deja tal cual.
-                    monto_cleaned = monto_str_raw
-            else: # Para otras monedas (por defecto como USD, punto decimal)
-                monto_cleaned = monto_str_raw.replace(',', '') 
+                        monto_str_processed = monto_str_processed.replace('.', '') # Elimina todos los puntos. Ej: "26.25" -> "2625"
+                    else: # Si el último segmento tiene 3 o más dígitos después del punto (ej. 123.456), asumimos que el punto es un separador de miles y lo quitamos
+                          # Esto es para casos como "123.456" que debería ser "123456"
+                        monto_str_processed = monto_str_processed.replace('.', '')
+                # Regla 3: Si no hay puntos ni comas (ej. "26250"), se deja tal cual.
+                # monto_str_processed ya tiene el valor original si no hubo puntos/comas
             
             try:
-                monto = float(monto_cleaned)
+                monto = float(monto_str_processed)
             except ValueError:
-                sys.stderr.write(f"ADVERTENCIA: No se pudo convertir el monto '{monto_cleaned}' a float. Estableciendo a 0.00.\n")
+                sys.stderr.write(f"ADVERTENCIA: No se pudo convertir el monto '{monto_str_processed}' a float. Estableciendo a 0.00.\n")
                 monto = 0.00 
 
+            # --- LÓGICA DE MULTIPLICACIÓN POR 1000 PARA COLONES (CRC) ---
+            # Solo aplica si la moneda es CRC y el monto es "sospechosamente" bajo
+            # Y si el string original contenía un punto y los dígitos después eran 1 o 2 (ej. 26.25)
+            if moneda == 'CRC' and monto < 1000 and '.' in original_monto_str_raw:
+                parts = original_monto_str_raw.split('.')
+                if len(parts[-1]) <= 2: # Si el último segmento después del punto tiene 1 o 2 dígitos
+                    sys.stderr.write(f"DEBUG: Monto CRC '{original_monto_str_raw}' (extraído como {monto}) parece ser un valor bajo. Multiplicando por 1000.\n")
+                    monto = monto * 1000.0
+                    sys.stderr.write(f"DEBUG: Nuevo monto CRC: {monto}\n")
+
+
         # --- EXTRACCIÓN DEL COMERCIO ---
-        # Patrón flexible que busca la etiqueta "Comercio:" o frases similares.
+        # Patrón flexible para "Comercio: [Nombre]" o frases similares.
         # Captura el nombre que puede contener letras, números, espacios, puntos, guiones y ampersands (&).
         comercio_match = re.search(
             r'(?:Comercio|Compra en|Movimiento en|Transacción en):\s*([A-Za-z0-9\s\.\-&]+)', 
             text_to_parse, re.IGNORECASE
         )
         if comercio_match:
-            comercio = comercio_match.group(1).strip()
+            comercio_raw = comercio_match.group(1).strip()
+            
+            # --- Ajuste para el nombre del comercio / nombre_gasto: Capturar todo delante de "Ciudad" ---
+            # Si "Ciudad" está en el nombre del comercio, la RegEx busca "Ciudad" y captura lo que haya antes.
+            ciudad_split_match = re.search(r'(.+?)\s+Ciudad', comercio_raw, re.IGNORECASE)
+            if ciudad_split_match:
+                comercio = ciudad_split_match.group(1).strip()
+            else:
+                comercio = comercio_raw # Si no encuentra "Ciudad", usa el nombre completo extraído.
+            
+            # Asignar a nombre_gasto también si es lo que deseas
+            nombre_gasto = comercio 
         
         # --- EXTRACCIÓN DE FECHA DE TRANSACCIÓN ---
         fecha_transaccion_match = re.search(
@@ -185,7 +191,7 @@ def handle_request():
 
         # --- Preparación de la Respuesta JSON ---
         response_data = {
-            "nombre_gasto": nombre_gasto,
+            "nombre_gasto": nombre_gasto, # Ahora se asigna lo que se extrae para comercio
             "moneda": moneda,
             "monto": monto, 
             "comercio": comercio,
