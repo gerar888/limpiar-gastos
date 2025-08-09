@@ -104,7 +104,7 @@ def handle_request():
                 parts = original_monto_str_raw.split('.')
                 if len(parts[-1]) <= 2: # Si el último segmento después del punto tiene 1 o 2 dígitos
                     sys.stderr.write(f"DEBUG: Monto CRC '{original_monto_str_raw}' (extraído como {monto}) parece ser un valor bajo. Multiplicando por 1000.\n")
-                    monto = monto * 10.0
+                    monto = monto * 1.0
                     sys.stderr.write(f"DEBUG: Nuevo monto CRC: {monto}\n")
 
 
