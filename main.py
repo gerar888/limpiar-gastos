@@ -100,7 +100,7 @@ def handle_request():
             # --- LÓGICA DE MULTIPLICACIÓN POR 1000 PARA COLONES (CRC) ---
             # Solo aplica si la moneda es CRC y el monto es "sospechosamente" bajo
             # Y si el string original contenía un punto y los dígitos después eran 1 o 2 (ej. 26.25)
-            if moneda == 'CRC' and monto < 1000 and '.' in original_monto_str_raw:
+            if moneda == 'CRC' and monto < 10 and '.' in original_monto_str_raw:
                 parts = original_monto_str_raw.split('.')
                 if len(parts[-1]) <= 2: # Si el último segmento después del punto tiene 1 o 2 dígitos
                     sys.stderr.write(f"DEBUG: Monto CRC '{original_monto_str_raw}' (extraído como {monto}) parece ser un valor bajo. Multiplicando por 1000.\n")
